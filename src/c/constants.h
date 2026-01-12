@@ -18,7 +18,6 @@
 #define KEY_BG_STRING 11    // Formatted BG value, e.g. "7.5" or "135"
 #define KEY_ARROW_INDEX 12
 #define KEY_DELTA_STRING 13 // Formatted delta, e.g. "+0.3" or "-5"
-#define KEY_IOB_MILLIUNITS 14
 #define KEY_PHONE_BATTERY 15
 #define KEY_GRAPH_DATA 16 // Always mg/dL integers
 
@@ -26,11 +25,8 @@
 #define CAP_BG (1 << 0)
 #define CAP_TREND_ARROW (1 << 1)
 #define CAP_DELTA (1 << 2)
-#define CAP_IOB (1 << 3)
-#define CAP_PUMP_STATE (1 << 4)
-#define CAP_PHONE_BATTERY (1 << 5)
-#define CAP_PUMP_BATTERY (1 << 6)
-#define CAP_GRAPH (1 << 7)
+#define CAP_PHONE_BATTERY (1 << 4)
+#define CAP_GRAPH (1 << 5)
 
 // Trend arrow values
 #define ARROW_UNKNOWN 0
