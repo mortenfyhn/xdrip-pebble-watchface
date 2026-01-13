@@ -2,7 +2,7 @@
 #include "constants.h"
 #include <pebble.h>
 
-// UI elements
+// Layout elements
 static Window *s_main_window;
 static Layer *s_bottom_bg_layer;
 static TextLayer *s_bg_layer;
