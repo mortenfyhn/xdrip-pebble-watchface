@@ -26,6 +26,12 @@
 #define KEY_DELTA_STRING 12 // Formatted delta, e.g. "+0.3" or "-5"
 #define KEY_ARROW_INDEX 13
 
+// Persistent storage keys
+#define PERSIST_KEY_BG_TIMESTAMP 0
+#define PERSIST_KEY_BG_STRING 1
+#define PERSIST_KEY_DELTA_STRING 2
+#define PERSIST_KEY_ARROW_INDEX 3
+
 // Capability bits (what data the watchface wants to receive)
 #define CAP_BG (1 << 0)
 #define CAP_TREND_ARROW (1 << 1)
@@ -66,6 +72,26 @@ static inline char *safe_strncpy(char *dest, const char *src, size_t count) {
         dest[count - 1] = '\0';
     }
     return dest;
+}
+
+static void save_data_to_storage(void) {
+    persist_write_int(PERSIST_KEY_BG_TIMESTAMP, s_bg_timestamp);
+    persist_write_string(PERSIST_KEY_BG_STRING, s_bg_string);
+    persist_write_string(PERSIST_KEY_DELTA_STRING, s_delta_string);
+    persist_write_int(PERSIST_KEY_ARROW_INDEX, s_arrow_index);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Saved data to persistent storage");
+}
+
+static void load_data_from_storage(void) {
+    if (persist_exists(PERSIST_KEY_BG_TIMESTAMP)) {
+        s_bg_timestamp = persist_read_int(PERSIST_KEY_BG_TIMESTAMP);
+        persist_read_string(PERSIST_KEY_BG_STRING, s_bg_string, sizeof(s_bg_string));
+        persist_read_string(PERSIST_KEY_DELTA_STRING, s_delta_string, sizeof(s_delta_string));
+        s_arrow_index = persist_read_int(PERSIST_KEY_ARROW_INDEX);
+        APP_LOG(APP_LOG_LEVEL_INFO, "Loaded data from persistent storage: BG=%s", s_bg_string);
+    } else {
+        APP_LOG(APP_LOG_LEVEL_INFO, "No persisted data found");
+    }
 }
 
 static void update_displayed_time_ago(void) {
@@ -114,6 +140,7 @@ static void update_displayed_time_and_date(void) {
 }
 
 static void window_load(Window *window) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "window_load called");
     Layer *root_layer = window_get_root_layer(window);
 
     // BG value - top, left
@@ -168,6 +195,7 @@ static void window_load(Window *window) {
 }
 
 static void window_unload(Window *window) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "window_unload called");
     text_layer_destroy(s_bg_layer);
     text_layer_destroy(s_delta_layer);
     text_layer_destroy(s_time_ago_layer);
@@ -185,6 +213,7 @@ void minute_tick_callback(struct tm *tick_time, TimeUnits units_changed) {
 }
 
 static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "new_xdrip_data_callback called");
     // Check for timestamp (always present in data messages)
     Tuple *timestamp_tuple = dict_find(iter, KEY_BG_TIMESTAMP);
     if (timestamp_tuple) {
@@ -210,6 +239,7 @@ static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
 
         update_displayed_xdrip_data();
         update_displayed_time_ago();
+        save_data_to_storage();
 
         APP_LOG(APP_LOG_LEVEL_INFO, "Received BG: %s, arrow: %d, delta: %s", s_bg_string,
                 s_arrow_index, s_delta_string);
@@ -218,6 +248,7 @@ static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
 
 // This can also be used to trigger xDrip to send fresh data.
 void send_capability_announcement(void) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "send_capability_announcement called");
     DictionaryIterator *iter;
     AppMessageResult result = app_message_outbox_begin(&iter);
 
@@ -234,11 +265,12 @@ void send_capability_announcement(void) {
     if (result != APP_MSG_OK) {
         APP_LOG(APP_LOG_LEVEL_ERROR, "Failed to send capabilities: %d", result);
     } else {
-        APP_LOG(APP_LOG_LEVEL_INFO, "Sent capability announcement");
+        APP_LOG(APP_LOG_LEVEL_INFO, "Capability announcement sent successfully");
     }
 }
 
 static void bluetooth_callback(bool connected) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "bluetooth_callback: connected=%d", connected);
     // Re-send capabilities on reconnect. This triggers xDrip to send fresh data.
     if (connected) {
         send_capability_announcement();
@@ -255,6 +287,10 @@ void init_test_mode_data(void) {
 }
 
 void init(void) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "init called - app starting");
+
+    load_data_from_storage();
+
     app_message_register_inbox_received(new_xdrip_data_callback);
     app_message_open(/*in*/ 256, /*out*/ 64);
 
@@ -272,6 +308,7 @@ void init(void) {
 }
 
 void deinit(void) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "deinit called - app shutting down");
     app_message_deregister_callbacks();
     tick_timer_service_unsubscribe();
     connection_service_unsubscribe();
