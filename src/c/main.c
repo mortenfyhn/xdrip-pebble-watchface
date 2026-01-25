@@ -57,9 +57,9 @@ static char s_date_buffer[11] = "";    // Fits 'Tue 13 Jan'
 
 // Graph data
 #define GRAPH_HOURS 24
-#define MAX_GRAPH_POINTS 240                         // 24 hours @ 5 min intervals = 288
+#define MAX_GRAPH_POINTS 300                         // Rounded limit with margin
 static uint32_t s_graph_ref_timestamp = 0;           // Reference timestamp (seconds)
-static uint8_t s_graph_count = 0;                    // Number of graph points
+static uint16_t s_graph_count = 0;                   // Number of graph points
 static uint16_t s_graph_offsets[MAX_GRAPH_POINTS];   // Minutes since ref_timestamp (uint16)
 static uint16_t s_graph_bg_values[MAX_GRAPH_POINTS]; // BG values in mg/dL
 static uint16_t s_graph_high_line = 180;             // High BG threshold (mg/dL)
@@ -302,34 +302,36 @@ static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
 
         // Graph data
         Tuple *graph_tuple = dict_find(iter, KEY_GRAPH_DATA);
-        if (graph_tuple && graph_tuple->length >= 5) {
+        if (graph_tuple && graph_tuple->length >= 6) {
             const uint8_t *data = graph_tuple->value->data;
 
             // Parse reference timestamp (4 bytes, little-endian)
             s_graph_ref_timestamp = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
 
-            // Parse count
-            s_graph_count = data[4];
-            APP_LOG(APP_LOG_LEVEL_INFO, "Raw count byte: %d (0x%02X)", data[4], data[4]);
+            // Parse count (uint16, little-endian)
+            s_graph_count = data[4] | (data[5] << 8);
+            APP_LOG(APP_LOG_LEVEL_INFO, "Raw count: %d", s_graph_count);
             if (s_graph_count > MAX_GRAPH_POINTS) {
+                APP_LOG(APP_LOG_LEVEL_WARNING, "Count %d exceeds max %d, clamping",
+                        s_graph_count, MAX_GRAPH_POINTS);
                 s_graph_count = MAX_GRAPH_POINTS;
             }
 
-            // Verify we have enough data (5 header + count*2 offsets + count*1 bg values)
-            int expected_size = 5 + (s_graph_count * 3);
+            // Verify we have enough data (6 header + count*2 offsets + count*1 bg values)
+            int expected_size = 6 + (s_graph_count * 3);
             APP_LOG(APP_LOG_LEVEL_INFO, "Graph: count=%d, expected=%d bytes, actual=%u bytes",
                     s_graph_count, expected_size, graph_tuple->length);
 
             if (graph_tuple->length >= expected_size) {
                 // Parse time offsets (uint16, little-endian)
                 for (int i = 0; i < s_graph_count; i++) {
-                    int offset_idx = 5 + (i * 2);
+                    int offset_idx = 6 + (i * 2);
                     s_graph_offsets[i] = data[offset_idx] | (data[offset_idx + 1] << 8);
                 }
 
                 // Parse BG values (multiply by 2 to restore original mg/dL)
                 for (int i = 0; i < s_graph_count; i++) {
-                    s_graph_bg_values[i] = data[5 + (s_graph_count * 2) + i] * 2;
+                    s_graph_bg_values[i] = data[6 + (s_graph_count * 2) + i] * 2;
                 }
 
                 APP_LOG(APP_LOG_LEVEL_INFO, "Received graph: ref_ts=%lu", s_graph_ref_timestamp);
