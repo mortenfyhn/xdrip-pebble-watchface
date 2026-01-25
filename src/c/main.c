@@ -14,6 +14,8 @@
 #include "test_mode.h"
 #include <pebble.h>
 
+#define GRAPH_HOURS 6
+
 #define PROTOCOL_VERSION 1 // Bump for breaking protocol changes
 
 // Message keys: Pebble -> xDrip capability announcement
@@ -138,9 +140,9 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     const int height = bounds.size.h;
 
     // Graph parameters
-    const int graph_duration_minutes = 3 * 60; // 3 hours
-    const int bg_min = 0;                      // mg/dL
-    const int bg_max = 288;                    // mg/dL
+
+    const int bg_min = 0;   // mg/dL
+    const int bg_max = 288; // mg/dL
 
     graphics_context_set_fill_color(ctx, GColorBlack);
 
@@ -159,10 +161,12 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     // graphics_draw_line(ctx, GPoint(0, low_y), GPoint(width, low_y));
     // }
 
+    const int graph_minutes = GRAPH_HOURS * 60;
+
     // Draw each point as a dot
     for (int i = 0; i < s_graph_count; i++) {
         // X position: offset / total_duration * width
-        int x = (s_graph_offsets[i] * width) / graph_duration_minutes;
+        int x = (s_graph_offsets[i] * width) / graph_minutes;
 
         // Y position: inverted (high BG at top)
         int bg = s_graph_bg_values[i];
@@ -172,7 +176,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
             bg = bg_max;
         int y = height - ((bg - bg_min) * height) / (bg_max - bg_min);
 
-        // Draw a small dot (2x2 filled rect)
+        // Draw a dot
         graphics_fill_rect(ctx, GRect(x - 1, y - 1, 3, 3), 0, GCornerNone);
     }
 }
@@ -255,6 +259,9 @@ void minute_tick_callback(struct tm *tick_time, TimeUnits units_changed) {
 }
 
 static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
+
+    APP_LOG(APP_LOG_LEVEL_INFO, "incoming dict size: %lu", dict_size(iter));
+
     // Check for timestamp (always present in data messages)
     Tuple *timestamp_tuple = dict_find(iter, KEY_BG_TIMESTAMP);
     if (timestamp_tuple) {
@@ -305,6 +312,7 @@ static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
                 }
 
                 APP_LOG(APP_LOG_LEVEL_INFO, "Received graph: %d points", s_graph_count);
+                APP_LOG(APP_LOG_LEVEL_INFO, "Tuple size: %u bytes", graph_tuple->length);
 
                 // Trigger graph redraw
                 if (s_graph_layer) {
@@ -347,7 +355,7 @@ void send_capability_announcement(void) {
     dict_write_uint8(iter, KEY_PROTOCOL_VERSION, PROTOCOL_VERSION);
     const uint32_t capabilities = CAP_BG | CAP_TREND_ARROW | CAP_DELTA | CAP_GRAPH;
     dict_write_uint32(iter, KEY_CAPABILITIES, capabilities);
-    dict_write_uint8(iter, KEY_GRAPH_HOURS, 3); // Request 3 hours of graph data
+    dict_write_uint8(iter, KEY_GRAPH_HOURS, GRAPH_HOURS);
 
     result = app_message_outbox_send();
     if (result != APP_MSG_OK) {
@@ -372,7 +380,7 @@ void init_test_mode_data(void) {
     safe_strncpy(s_delta_string, TEST_DELTA_STRING, sizeof(s_delta_string));
 
     // Initialize test graph data (3 hours, every 5 minutes)
-    s_graph_ref_timestamp = time(NULL) - (3 * 60 * 60); // 3 hours ago
+    s_graph_ref_timestamp = time(NULL) - (GRAPH_HOURS * 60 * 60); // 3 hours ago
     s_graph_count = TEST_GRAPH_COUNT;
 
     for (int i = 0; i < TEST_GRAPH_COUNT; i++) {
