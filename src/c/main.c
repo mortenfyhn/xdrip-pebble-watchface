@@ -14,8 +14,6 @@
 #include "test_mode.h"
 #include <pebble.h>
 
-#define GRAPH_HOURS 6
-
 #define PROTOCOL_VERSION 1 // Bump for breaking protocol changes
 
 // Message keys: Pebble -> xDrip capability announcement
@@ -36,7 +34,6 @@
 #define CAP_BG (1 << 0)
 #define CAP_TREND_ARROW (1 << 1)
 #define CAP_DELTA (1 << 2)
-#define CAP_GRAPH (1 << 3)
 
 // Layout elements
 static Window *s_window = NULL;
@@ -59,10 +56,11 @@ static char s_time_buffer[6] = "";     // Fits '20:23'
 static char s_date_buffer[11] = "";    // Fits 'Tue 13 Jan'
 
 // Graph data
-#define MAX_GRAPH_POINTS 60
+#define GRAPH_HOURS 24
+#define MAX_GRAPH_POINTS 240                         // 24 hours @ 5 min intervals = 288
 static uint32_t s_graph_ref_timestamp = 0;           // Reference timestamp (seconds)
 static uint8_t s_graph_count = 0;                    // Number of graph points
-static uint8_t s_graph_offsets[MAX_GRAPH_POINTS];    // Minutes since ref_timestamp
+static uint16_t s_graph_offsets[MAX_GRAPH_POINTS];   // Minutes since ref_timestamp (uint16)
 static uint16_t s_graph_bg_values[MAX_GRAPH_POINTS]; // BG values in mg/dL
 static uint16_t s_graph_high_line = 180;             // High BG threshold (mg/dL)
 static uint16_t s_graph_low_line = 72;               // Low BG threshold (mg/dL)
@@ -162,11 +160,28 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     // }
 
     const int graph_minutes = GRAPH_HOURS * 60;
+    const uint32_t now = time(NULL);
 
     // Draw each point as a dot
     for (int i = 0; i < s_graph_count; i++) {
-        // X position: offset / total_duration * width
-        int x = (s_graph_offsets[i] * width) / graph_minutes;
+        // Calculate absolute timestamp of this point
+        uint32_t point_timestamp = s_graph_ref_timestamp + (s_graph_offsets[i] * 60);
+
+        // Calculate how many minutes ago this point was from now
+        int minutes_ago = (now - point_timestamp) / 60;
+
+        // Skip points that are too old (off the left edge)
+        if (minutes_ago > graph_minutes) {
+            continue;
+        }
+
+        // X position: right edge = now (0 min ago), left edge = graph_minutes ago
+        int x = width - ((minutes_ago * width) / graph_minutes);
+
+        // Skip points that would be off-screen (negative x or too far right)
+        if (x < 0 || x >= width) {
+            continue;
+        }
 
         // Y position: inverted (high BG at top)
         int bg = s_graph_bg_values[i];
@@ -295,24 +310,33 @@ static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
 
             // Parse count
             s_graph_count = data[4];
+            APP_LOG(APP_LOG_LEVEL_INFO, "Raw count byte: %d (0x%02X)", data[4], data[4]);
             if (s_graph_count > MAX_GRAPH_POINTS) {
                 s_graph_count = MAX_GRAPH_POINTS;
             }
 
-            // Verify we have enough data
-            if (graph_tuple->length >= (5 + s_graph_count * 2)) {
-                // Parse time offsets
+            // Verify we have enough data (5 header + count*2 offsets + count*1 bg values)
+            int expected_size = 5 + (s_graph_count * 3);
+            APP_LOG(APP_LOG_LEVEL_INFO, "Graph: count=%d, expected=%d bytes, actual=%u bytes",
+                    s_graph_count, expected_size, graph_tuple->length);
+
+            if (graph_tuple->length >= expected_size) {
+                // Parse time offsets (uint16, little-endian)
                 for (int i = 0; i < s_graph_count; i++) {
-                    s_graph_offsets[i] = data[5 + i];
+                    int offset_idx = 5 + (i * 2);
+                    s_graph_offsets[i] = data[offset_idx] | (data[offset_idx + 1] << 8);
                 }
 
                 // Parse BG values (multiply by 2 to restore original mg/dL)
                 for (int i = 0; i < s_graph_count; i++) {
-                    s_graph_bg_values[i] = data[5 + s_graph_count + i] * 2;
+                    s_graph_bg_values[i] = data[5 + (s_graph_count * 2) + i] * 2;
                 }
 
-                APP_LOG(APP_LOG_LEVEL_INFO, "Received graph: %d points", s_graph_count);
-                APP_LOG(APP_LOG_LEVEL_INFO, "Tuple size: %u bytes", graph_tuple->length);
+                APP_LOG(APP_LOG_LEVEL_INFO, "Received graph: ref_ts=%lu", s_graph_ref_timestamp);
+                APP_LOG(APP_LOG_LEVEL_INFO, "First point: offset=%d min, bg=%d mg/dL",
+                        s_graph_offsets[0], s_graph_bg_values[0]);
+                APP_LOG(APP_LOG_LEVEL_INFO, "Last point: offset=%d min, bg=%d mg/dL",
+                        s_graph_offsets[s_graph_count - 1], s_graph_bg_values[s_graph_count - 1]);
 
                 // Trigger graph redraw
                 if (s_graph_layer) {
@@ -353,8 +377,7 @@ void send_capability_announcement(void) {
     }
 
     dict_write_uint8(iter, KEY_PROTOCOL_VERSION, PROTOCOL_VERSION);
-    const uint32_t capabilities = CAP_BG | CAP_TREND_ARROW | CAP_DELTA | CAP_GRAPH;
-    dict_write_uint32(iter, KEY_CAPABILITIES, capabilities);
+    dict_write_uint32(iter, KEY_CAPABILITIES, CAP_BG | CAP_TREND_ARROW | CAP_DELTA);
     dict_write_uint8(iter, KEY_GRAPH_HOURS, GRAPH_HOURS);
 
     result = app_message_outbox_send();
@@ -398,9 +421,18 @@ void init_test_mode_data(void) {
 #endif
 }
 
+static void inbox_dropped_callback(AppMessageResult reason, void *context) {
+    // A message was received, but had to be dropped
+    APP_LOG(APP_LOG_LEVEL_ERROR, "Message dropped. Reason: %d", (int)reason);
+}
+
 void init(void) {
     app_message_register_inbox_received(new_xdrip_data_callback);
-    app_message_open(/*in*/ 256, /*out*/ 64);
+
+    // Register to be notified about inbox dropped events
+    app_message_register_inbox_dropped(inbox_dropped_callback);
+
+    app_message_open(/*in*/ 1024, /*out*/ 64);
 
     tick_timer_service_subscribe(MINUTE_UNIT, minute_tick_callback);
 
