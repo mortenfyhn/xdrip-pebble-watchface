@@ -2,14 +2,18 @@
   "name": "xdrip-pebble-reference-watchface",
   "author": "Morten Fyhn Amundsen",
   "version": "1.0.0",
-  "keywords": ["pebble-app"],
+  "keywords": [
+    "pebble-app"
+  ],
   "private": true,
-  "dependencies": {},
   "pebble": {
     "displayName": "xDrip Reference Watchface",
     "uuid": "95190d49-16be-4e33-b112-d14fa22fb6eb",
     "sdkVersion": "3",
-    "enableMultiJS": false,
+    "enableMultiJS": true,
+    "capabilities": [
+      "configurable"
+    ],
     "targetPlatforms": [
       "aplite",
       "basalt",
@@ -73,5 +77,8 @@
         }
       ]
     }
+  },
+  "dependencies": {
+    "@rebble/clay": "^1.0.6"
   }
 }

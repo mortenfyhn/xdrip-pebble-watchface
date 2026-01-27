@@ -26,6 +26,9 @@ static BitmapLayer *s_arrow_layer = NULL;
 static GBitmap *s_arrow_bitmap = NULL;
 static Layer *s_graph_layer = NULL;
 
+// Persistent storage keys
+#define PERSIST_KEY_GRAPH_HOURS 1
+
 // Watchface data
 static uint32_t s_bg_timestamp = 0;    // Seconds since epoch
 static char s_bg_string[5] = "---";    // Fits '10.0'
@@ -38,7 +41,7 @@ static char s_date_buffer[11] = "";    // Fits 'Tue 13 Jan'
 // Graph config
 // All graph BG values are stored in "mg/dL / 2" units (matching wire protocol).
 // This gives 0-510 mg/dL range with 2 mg/dL (0.1 mmol/L) resolution in one byte.
-#define GRAPH_HOURS 3
+#define GRAPH_HOURS_DEFAULT 3
 #define MAX_GRAPH_POINTS 300                        // 24 hours @ 5 min intervals = 288
 static uint32_t s_graph_ref_timestamp = 0;          // Reference timestamp (seconds)
 static uint16_t s_graph_count = 0;                  // Number of graph points
@@ -46,6 +49,7 @@ static uint16_t s_graph_offsets[MAX_GRAPH_POINTS];  // Minutes since ref_timesta
 static uint8_t s_graph_bg_values[MAX_GRAPH_POINTS]; // BG values (mg/dL / 2)
 static uint8_t s_graph_high_line = 90;              // High threshold (mg/dL / 2) = 180 mg/dL
 static uint8_t s_graph_low_line = 36;               // Low threshold (mg/dL / 2) = 72 mg/dL
+static uint8_t s_graph_hours = GRAPH_HOURS_DEFAULT; // Configurable graph hours
 
 // Mapping: Arrow index -> Arrow image resource ID
 static const uint32_t ARROWS[] = {0, // unknown, no arrow
@@ -56,6 +60,9 @@ static const uint32_t ARROWS[] = {0, // unknown, no arrow
                                   RESOURCE_ID_ARROW_DOWN_SLANT,
                                   RESOURCE_ID_ARROW_DOWN,
                                   RESOURCE_ID_ARROW_DOWN_DOUBLE};
+
+// Forward declarations
+static void send_capability_announcement(void);
 
 static inline char *safe_strncpy(char *dest, const char *src, size_t count) {
     if (count > 0) {
@@ -132,7 +139,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_fill_rect(ctx, GRect(0, high_y, width, 2), 0, GCornerNone);
     graphics_fill_rect(ctx, GRect(0, low_y, width, 2), 0, GCornerNone);
 
-    const int graph_minutes = GRAPH_HOURS * 60;
+    const int graph_minutes = s_graph_hours * 60;
     const uint32_t now = time(NULL);
 
     // Draw each point as a dot
@@ -243,9 +250,56 @@ void minute_tick_callback(struct tm *tick_time, TimeUnits units_changed) {
     update_displayed_time_ago();
 }
 
+static void load_settings(void) {
+    // Load graph hours from persistent storage
+    if (persist_exists(PERSIST_KEY_GRAPH_HOURS)) {
+        int loaded_hours = persist_read_int(PERSIST_KEY_GRAPH_HOURS);
+        // Validate range (1-12 hours as per config.js)
+        if (loaded_hours >= 1 && loaded_hours <= 12) {
+            s_graph_hours = loaded_hours;
+            APP_LOG(APP_LOG_LEVEL_INFO, "Loaded graph hours: %d", s_graph_hours);
+        } else {
+            APP_LOG(APP_LOG_LEVEL_WARNING, "Invalid graph hours %d in storage, using default", loaded_hours);
+            s_graph_hours = GRAPH_HOURS_DEFAULT;
+        }
+    } else {
+        s_graph_hours = GRAPH_HOURS_DEFAULT;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Using default graph hours: %d", s_graph_hours);
+    }
+}
+
+static void save_graph_hours(int hours) {
+    // Validate range
+    if (hours < 1 || hours > 12) {
+        APP_LOG(APP_LOG_LEVEL_WARNING, "Ignoring invalid graph hours: %d", hours);
+        return;
+    }
+
+    s_graph_hours = hours;
+    persist_write_int(PERSIST_KEY_GRAPH_HOURS, hours);
+    APP_LOG(APP_LOG_LEVEL_INFO, "Saved graph hours: %d", hours);
+
+    // Re-announce capabilities with new graph hours
+    send_capability_announcement();
+
+    // Redraw graph with new time window
+    if (s_graph_layer) {
+        layer_mark_dirty(s_graph_layer);
+    }
+}
+
 static void new_xdrip_data_callback(DictionaryIterator *iter, void *context) {
 
     APP_LOG(APP_LOG_LEVEL_INFO, "incoming dict size: %lu", dict_size(iter));
+
+    // Check for settings message (GraphHours without timestamp)
+    Tuple *graph_hours_tuple = dict_find(iter, KEY_GRAPH_HOURS);
+    if (graph_hours_tuple && !dict_find(iter, KEY_BG_TIMESTAMP)) {
+        // This is a settings message from Clay (sends as int32)
+        save_graph_hours(graph_hours_tuple->value->int32);
+        APP_LOG(APP_LOG_LEVEL_INFO, "Received settings: graph_hours=%d", s_graph_hours);
+        return;
+    }
 
     // Check for timestamp (always present in data messages)
     Tuple *timestamp_tuple = dict_find(iter, KEY_BG_TIMESTAMP);
@@ -351,7 +405,7 @@ void send_capability_announcement(void) {
 
     dict_write_uint8(iter, KEY_PROTOCOL_VERSION, PROTOCOL_VERSION);
     dict_write_uint32(iter, KEY_CAPABILITIES, CAP_BG | CAP_TREND_ARROW | CAP_DELTA);
-    dict_write_uint8(iter, KEY_GRAPH_HOURS, GRAPH_HOURS);
+    dict_write_uint8(iter, KEY_GRAPH_HOURS, s_graph_hours);
 
     result = app_message_outbox_send();
     if (result != APP_MSG_OK) {
@@ -376,7 +430,7 @@ void init_test_mode_data(void) {
     safe_strncpy(s_delta_string, TEST_DELTA_STRING, sizeof(s_delta_string));
 
     // Initialize test graph data (3 hours, every 5 minutes)
-    s_graph_ref_timestamp = time(NULL) - (GRAPH_HOURS * 60 * 60); // 3 hours ago
+    s_graph_ref_timestamp = time(NULL) - (s_graph_hours * 60 * 60); // 3 hours ago
     s_graph_count = TEST_GRAPH_COUNT;
 
     for (int i = 0; i < TEST_GRAPH_COUNT; i++) {
@@ -400,6 +454,9 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 }
 
 void init(void) {
+    // Load settings from persistent storage
+    load_settings();
+
     app_message_register_inbox_received(new_xdrip_data_callback);
 
     // Register to be notified about inbox dropped events
