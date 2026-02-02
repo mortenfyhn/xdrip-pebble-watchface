@@ -233,12 +233,6 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
 
                 graphics_draw_rect(ctx, GRect(dot_x, dot_y, 2, 2));
             }
-
-            // Draw arrow line
-            // graphics_draw_dotted_line(ctx, GPoint(prev_x, prev_y), arrow_end);
-
-            // Draw arrowhead
-            // draw_arrow_head(ctx, arrow_end, arrow_dx, arrow_dy, 4);
         }
     } else {
         APP_LOG(APP_LOG_LEVEL_DEBUG, "Arrow: not enough points, visible=%d", visible_count);
