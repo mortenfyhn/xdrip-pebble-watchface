@@ -90,6 +90,8 @@ static void update_displayed_time_and_date(void) {
     text_layer_set_text(s_date_layer, s_date_buffer);
 }
 
+// TODO split this into functions
+// TODO rename function?
 static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
     if (s_graph_count == 0) {
         return; // No data to display
@@ -147,11 +149,13 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
         const int y = height - ((bg - graph_min) * height) / (graph_max - graph_min);
 
         // Draw line connecting to previous point
-        if (visible_count > 0) {
+        if (visible_count > 0) { // TODO this if should be more clear, some sort of if prev point
+                                 // exists and dt is small enough
             graphics_draw_line(ctx, GPoint(prev_x, prev_y), GPoint(x, y));
         }
 
         // Track last two points for arrow calculation
+        // TODO why not just use current and prev???
         if (visible_count > 0) {
             prev_prev_x = prev_x;
             prev_prev_y = prev_y;
