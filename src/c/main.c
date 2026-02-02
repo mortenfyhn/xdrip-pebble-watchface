@@ -154,6 +154,10 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
             graphics_draw_line(ctx, GPoint(prev_x, prev_y), GPoint(x, y));
         }
 
+        // Draw dot
+        // graphics_fill_circle(ctx, GPoint(x, y), 2);
+        // graphics_draw_rect(ctx, GRect(x - 1, y - 1, 3, 3));
+
         // Track last two points for arrow calculation
         // TODO why not just use current and prev???
         if (visible_count > 0) {
