@@ -162,9 +162,6 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
         }
         prev_x = x;
         prev_y = y;
-
-        prev_x = x;
-        prev_y = y;
         visible_count++;
     }
 
