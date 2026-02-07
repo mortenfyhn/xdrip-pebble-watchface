@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/home/morten/workspace/pebble/xdrip-pebble-watchface",
+    "command": "clang -c -std=c11 -DRELEASE -DPBL_PLATFORM_BASALT -DPBL_COLOR -DPBL_RECT -DPBL_DISPLAY_WIDTH=144 -DPBL_DISPLAY_HEIGHT=168 -Istubs -Isrc/c -Ibuild/include -fsyntax-only src/c/main.c",
+    "file": "src/c/main.c"
+  }
+]
