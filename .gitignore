@@ -1,3 +1,5 @@
 build/
 .lock-waf_*
 node_modules/
+stubs/
+compile_commands.json

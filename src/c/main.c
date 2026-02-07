@@ -209,7 +209,7 @@ static void graph_layer_update_proc(Layer *layer, GContext *ctx) {
 
             const int num_dots = 3;
             const int dot_dx = PBL_DISPLAY_WIDTH / (8 * num_dots);
-            const int dot_dy = dot_dx * dy / dx;
+            const int dot_dy = (dx != 0) ? (dot_dx * dy / dx) : 0;
             int dot_x = prev_x;
             int dot_y = prev_y;
             for (int i = 0; i < num_dots; ++i) {

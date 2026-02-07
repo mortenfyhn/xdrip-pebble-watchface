@@ -1,0 +1,5 @@
+---
+Checks: 'misc-const-correctness,clang-analyzer-core.DivideZero'
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+FormatStyle: file
